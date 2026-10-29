@@ -1,0 +1,19 @@
+[project]
+name = "csn-lab4"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Eneko Sabaté", email = "enekosi@protonmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "conllu>=6.0.0",
+]
+
+[project.scripts]
+csn-lab4 = "csn_lab4:main"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
