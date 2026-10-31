@@ -1,10 +1,12 @@
 import csv
 from pathlib import Path
+from statistics import mean, stdev
 
 from conllu import parse_incr
 
 UD_DATA_DIR = Path("data/ud-treebanks-v2.18/").resolve()
 OUTPUT_DIR = Path("output/languages/").resolve()
+SUMMARY_CSV_PATH = Path("output/summary_dependency_tree_metrics.csv").resolve()
 
 LANGUAGE_FILES = {
     "Arabic": [
@@ -197,21 +199,24 @@ def compute_sentence_metrics(token_list):
 
     k2_avg = sum(k**2 for k in degrees.values()) / n
     d_avg = sum(edge_lengths) / len(edge_lengths)
-
-    # q = number of vertices with odd degree
     q = sum(k % 2 for k in degrees.values())
 
     return n, k2_avg, d_avg, q
 
 
-# Ensure common output directory exists
+# Ensure output paths exist
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+SUMMARY_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Process each language and write to separate CSV files
+summary_rows = []
+
+# Process each language
 for lang, files in LANGUAGE_FILES.items():
     print(f"Processing {lang}...")
-    output_path = OUTPUT_DIR / f"{lang.lower()}_dependency_tree_metrics.csv"
-    sentence_count = 0
+    output_path = OUTPUT_DIR / f"{lang.lower()}_metrics.csv"
+
+    n_list = []
+    d_avg_list = []
 
     with open(output_path, mode="w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
@@ -228,8 +233,29 @@ for lang, files in LANGUAGE_FILES.items():
                     if metrics is not None:
                         n, k2_avg, d_avg, q = metrics
                         writer.writerow([n, k2_avg, d_avg, q])
-                        sentence_count += 1
 
-    print(f"  Processed {sentence_count} sentences -> saved to {output_path}")
+                        n_list.append(n)
+                        d_avg_list.append(d_avg)
 
-print(f"Done! All language files written to directory: '{OUTPUT_DIR}'.")
+    # Compute summary statistics for Table 1 (target metric x = <d>)
+    N = len(n_list)
+    if N > 0:
+        mu_n = mean(n_list)
+        sd_n = stdev(n_list) if N > 1 else 0.0
+        mu_x = mean(d_avg_list)
+        sd_x = stdev(d_avg_list) if N > 1 else 0.0
+
+        summary_rows.append(
+            [lang, N, round(mu_n, 4), round(sd_n, 4), round(mu_x, 4), round(sd_x, 4)]
+        )
+        print(
+            f"  {lang}: N={N}, µn={mu_n:.2f}, σn={sd_n:.2f}, µx={mu_x:.2f}, σx={sd_x:.2f}"
+        )
+
+# Write unified summary table across all languages
+with open(SUMMARY_CSV_PATH, mode="w", newline="", encoding="utf-8") as sum_file:
+    writer = csv.writer(sum_file)
+    writer.writerow(["Language", "N", "µn", "σn", "µx", "σx"])
+    writer.writerows(summary_rows)
+
+print(f"\nDone! Unique summary file written to '{SUMMARY_CSV_PATH}'.")
