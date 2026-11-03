@@ -213,7 +213,7 @@ summary_rows = []
 # Process each language
 for lang, files in LANGUAGE_FILES.items():
     print(f"Processing {lang}...")
-    output_path = OUTPUT_DIR / f"{lang.lower()}_metrics.csv"
+    output_path = OUTPUT_DIR / f"{lang.lower()}_dependency_tree_metrics.csv"
 
     n_list = []
     d_avg_list = []
@@ -237,7 +237,7 @@ for lang, files in LANGUAGE_FILES.items():
                         n_list.append(n)
                         d_avg_list.append(d_avg)
 
-    # Compute summary statistics for Table 1 (target metric x = <d>)
+    # compute summary statistics
     N = len(n_list)
     if N > 0:
         mu_n = mean(n_list)
