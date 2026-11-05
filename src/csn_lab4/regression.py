@@ -155,6 +155,10 @@ def plot_mean_length(
     if y_limits is not None:
         axis.set_ylim(y_limits)
 
+    axis.grid(True, which="major", axis="both", color="0.7", linewidth=0.9)
+    if log_scale:
+        axis.grid(True, which="minor", axis="both", color="0.88", linewidth=0.6)
+
     axis.set_xlabel("vertices")
     axis.set_ylabel(ylabel)
     axis.legend(loc="upper left", frameon=True, framealpha=0.95)
@@ -243,20 +247,31 @@ def main(argv: list[str] | None = None) -> None:
         description="Generate regression plots of the mean dependency length "
         "against the number of vertices of the dependency trees."
     )
-    parser.add_argument(
+    language_options = parser.add_mutually_exclusive_group()
+    language_options.add_argument(
         "--language",
         "-l",
         choices=get_available_languages(),
         default=DEFAULT_LANGUAGE,
         help="Language to analyze (default: %(default)s).",
     )
+    language_options.add_argument(
+        "--all-languages",
+        action="store_true",
+        help="Generate plots and run regression for every available language.",
+    )
     args = parser.parse_args(argv)
 
-    output_paths = plot_preliminary_results(args.language)
-    for path in output_paths:
-        print(f"Plot saved to '{path}'.")
+    languages = get_available_languages() if args.all_languages else [args.language]
+    if args.all_languages and not languages:
+        parser.error(f"No language metrics found in '{DEPENDENCY_TREE_METRICS_DIR}'.")
 
-    run_regression(args.language)
+    for language in languages:
+        output_paths = plot_preliminary_results(language)
+        for path in output_paths:
+            print(f"Plot saved to '{path}'.")
+
+        run_regression(language)
 
 
 if __name__ == "__main__":
