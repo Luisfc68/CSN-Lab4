@@ -33,10 +33,15 @@ LOG_LIMIT_PADDING = 1.05
 
 # Regression config
 MODEL_ENSEMBLE = {
+    "model_0": lambda n: n / 3 + 1 / 3,
     "model_1": lambda n, b: (n / 2) ** b,
     "model_2": lambda n, a, b: a * n**b,
     "model_3": lambda n, a, c: a * math.exp(c * n),
     "model_4": lambda n, a: a * math.log(n),
+    "model_1+": lambda n, b, d: (n / 2) ** b + d,
+    "model_2+": lambda n, a, b, d: a * n**b + d,
+    "model_3+": lambda n, a, c, d: a * math.exp(c * n) + d,
+    "model_4+": lambda n, a, d: a * math.log(n) + d,
 }
 
 
