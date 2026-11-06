@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -28,6 +29,9 @@ PLOT_STYLE = "whitegrid"
 PLOT_CONTEXT = "notebook"
 AVERAGE_COLOR = "#2ca02c"
 RANDOM_ARRANGEMENT_COLOR = "#d62728"
+SPREAD_COLOR = "#d95f02"
+MIN_GROUP_SIZE = 10
+SCATTER_MIN_GROUP_SIZE = 10
 LINEAR_LIMIT_PADDING = 0.05
 LOG_LIMIT_PADDING = 1.05
 
@@ -101,6 +105,45 @@ def shared_y_limits(values: list[pd.Series], *, log_scale: bool) -> tuple[float,
     return combined.min() - padding, combined.max() + padding
 
 
+def draw_spread(axis, plot_data: pd.DataFrame, *, log_scale: bool) -> None:
+    """Draw the mean and ±1 standard deviation per number of vertices.
+
+    Only numbers of vertices with at least ``MIN_GROUP_SIZE`` sentences are
+    shown. On a log scale the statistics are computed on ``log(mean_length)`` and
+    mapped back, so the band stays positive.
+    """
+    values = np.log(plot_data["mean_length"]) if log_scale else plot_data["mean_length"]
+    stats = (
+        plot_data.assign(value=values)
+        .groupby("vertices")["value"]
+        .agg(["mean", "std", "count"])
+    )
+    stats = stats[stats["count"] >= MIN_GROUP_SIZE]
+
+    center = stats["mean"]
+    lower = center - stats["std"]
+    upper = center + stats["std"]
+    if log_scale:
+        center, lower, upper = np.exp(center), np.exp(lower), np.exp(upper)
+
+    axis.fill_between(
+        stats.index,
+        lower,
+        upper,
+        color=SPREAD_COLOR,
+        alpha=0.25,
+        linewidth=0,
+        label="±σ",
+    )
+    axis.plot(
+        stats.index,
+        center,
+        color=SPREAD_COLOR,
+        linewidth=2,
+        label="mean per number of vertices",
+    )
+
+
 def plot_mean_length(
     data: pd.DataFrame,
     *,
@@ -110,8 +153,10 @@ def plot_mean_length(
     scatter_label: str = "sentences",
     scatter_size: float = 18,
     scatter_alpha: float = 0.35,
+    show_points: bool = True,
     lines: list[ReferenceLine] | None = None,
     y_limits: tuple[float, float] | None = None,
+    spread_data: pd.DataFrame | None = None,
 ) -> Path:
     """Plot mean dependency length against the number of vertices of a dependency tree.
 
@@ -120,6 +165,8 @@ def plot_mean_length(
 
     ``lines`` adds reference lines (e.g. the random linear arrangement expectation),
     drawn with seaborn and shown in the legend. ``y_limits`` sets the y-axis range.
+    ``spread_data`` overlays the mean and ±1 standard deviation per number of vertices,
+    computed from the per-sentence data it contains.
     """
     plot_data = data[["vertices", "mean_length"]].dropna().sort_values("vertices")
 
@@ -132,16 +179,26 @@ def plot_mean_length(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     figure, axis = plt.subplots(figsize=FIGURE_SIZE)
-    sns.scatterplot(
-        data=plot_data,
-        x="vertices",
-        y="mean_length",
-        ax=axis,
-        s=scatter_size,
-        alpha=scatter_alpha,
-        edgecolor="none",
-        label=scatter_label,
-    )
+    if show_points:
+        sns.scatterplot(
+            data=plot_data,
+            x="vertices",
+            y="mean_length",
+            ax=axis,
+            s=scatter_size,
+            alpha=scatter_alpha,
+            edgecolor="none",
+            label=scatter_label,
+        )
+
+    if spread_data is not None:
+        spread_plot_data = spread_data[["vertices", "mean_length"]].dropna()
+        if log_scale:
+            spread_plot_data = spread_plot_data[
+                (spread_plot_data["vertices"] > 0)
+                & (spread_plot_data["mean_length"] > 0)
+            ]
+        draw_spread(axis, spread_plot_data, log_scale=log_scale)
 
     for line in lines or []:
         sns.lineplot(
@@ -182,9 +239,14 @@ def plot_preliminary_results(language: str) -> list[Path]:
     data = metrics.rename(columns={"n": "vertices", "d_avg": "mean_length"})
 
     aggregated_data = data.groupby("vertices")["mean_length"].mean().reset_index()
+    group_counts = data.groupby("vertices")["mean_length"].count()
+    enough_data_vertices = group_counts[group_counts >= MIN_GROUP_SIZE].index
+    aggregated_points = aggregated_data[
+        aggregated_data["vertices"].isin(enough_data_vertices)
+    ]
     random_arrangement = ReferenceLine(
-        x=aggregated_data["vertices"],
-        y=(aggregated_data["vertices"] + 1) / 3,
+        x=aggregated_points["vertices"],
+        y=(aggregated_points["vertices"] + 1) / 3,
         color=RANDOM_ARRANGEMENT_COLOR,
         label="random linear arrangement (n + 1) / 3",
         linestyle="--",
@@ -199,40 +261,43 @@ def plot_preliminary_results(language: str) -> list[Path]:
         log_scale=True,
     )
 
+    scatter_data = data[
+        data.groupby("vertices")["mean_length"].transform("count")
+        >= SCATTER_MIN_GROUP_SIZE
+    ]
+
     mean_length_path = plot_mean_length(
-        data,
+        scatter_data,
         log_scale=False,
         filename=f"{language.lower()}_mean_length.png",
         y_limits=linear_limits,
     )
     mean_length_log_path = plot_mean_length(
-        data,
+        scatter_data,
         log_scale=True,
         filename=f"{language.lower()}_mean_length_log.png",
         y_limits=log_limits,
     )
 
     aggregated_path = plot_mean_length(
-        aggregated_data,
+        aggregated_points,
         log_scale=False,
         filename=f"{language.lower()}_mean_length_aggregated.png",
         ylabel="mean mean dependency length",
-        scatter_label="mean per number of vertices",
-        scatter_size=45,
-        scatter_alpha=0.9,
+        show_points=False,
         lines=[random_arrangement],
         y_limits=linear_limits,
+        spread_data=data,
     )
     aggregated_log_path = plot_mean_length(
-        aggregated_data,
+        aggregated_points,
         log_scale=True,
         filename=f"{language.lower()}_mean_length_aggregated_log.png",
         ylabel="mean mean dependency length",
-        scatter_label="mean per number of vertices",
-        scatter_size=45,
-        scatter_alpha=0.9,
+        show_points=False,
         lines=[random_arrangement],
         y_limits=log_limits,
+        spread_data=data,
     )
 
     return [
