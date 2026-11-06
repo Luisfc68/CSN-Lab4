@@ -10,6 +10,7 @@ requires-python = ">=3.14"
 dependencies = [
     "conllu>=6.0.0",
     "igraph>=1.0.0",
+    "scipy>=1.18.1",
     "seaborn>=0.13.2",
 ]
 
