@@ -23,19 +23,30 @@ RELATIVE_IMPROVEMENT = 1e-6
 
 # Artificial data config: Basque sentence lengths, noise from the fitted log residuals
 ARTIFICIAL_LANGUAGE = "Basque"
-ARTIFICIAL_NOISE_SD = 0.18
+ARTIFICIAL_NOISE_SD = 0.19
 REPLICATES = 25
 AIC_TIE = 2  # models within this AIC difference are not really distinguishable
+# Parameters of the log fit of each model to Basque, after removing punctuation
 TRUE_PARAMETERS = {
-    "1": (0.5,),
-    "2": (0.75, 0.49),
-    "3": (1.5, 0.036),
-    "4": (1.02,),
-    "1+": (0.5, 0.02),
-    "2+": (1.0, 0.43, -0.37),
-    "3+": (-4.0, -0.047, 4.8),
-    "4+": (1.12, -0.24),
+    "1": (0.4358,),
+    "2": (0.8054, 0.4011),
+    "3": (1.3594, 0.0352),
+    "4": (0.9087,),
+    "5": (0.7431, 0.4696, -0.0068),
+    "1+": (0.4175, 0.068),
+    "2+": (2.1613, 0.221, -1.5473),
+    "3+": (-2.3814, -0.0859, 3.0651),
+    "4+": (0.7429, 0.3584),
+    "5+": (3.9758, 0.131, 0.0013, -3.4016),
 }
+
+
+def random_start(model, data, rng) -> list[float]:
+    # On the log scheme a start with f(n) <= 0 has a flat error and the search cannot move
+    while True:
+        start = [rng.uniform(*RESTART_RANGES[p]) for p in model.parameters]
+        if not data.log_scale or np.all(model.function(data.n, *start) > 0):
+            return start
 
 
 def check_optimality() -> pd.DataFrame:
@@ -55,10 +66,9 @@ def check_optimality() -> pd.DataFrame:
                 reported_rss = float(np.sum(residuals(reported, model, data) ** 2))
                 best_rss = reported_rss
                 for _ in range(RESTARTS):
-                    start = [rng.uniform(*RESTART_RANGES[p]) for p in model.parameters]
                     solution = least_squares(
                         residuals,
-                        start,
+                        random_start(model, data, rng),
                         args=(model, data),
                         x_scale="jac",
                         max_nfev=3000,

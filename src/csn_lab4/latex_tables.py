@@ -6,16 +6,18 @@ REGRESSION_DIR = Path("output/regression/").resolve()
 P_VALUES_PATH = Path("output/homoscedasticity_p_values.csv").resolve()
 OUTPUT_DIR = Path("output/latex/").resolve()
 
-MODELS = ("0", "1", "2", "3", "4", "1+", "2+", "3+", "4+")
+MODELS = ("0", "1", "2", "3", "4", "5", "1+", "2+", "3+", "4+", "5+")
 PARAMETERS = {
     "1": ("b",),
     "2": ("a", "b"),
     "3": ("a", "c"),
     "4": ("a",),
+    "5": ("a", "b", "c"),
     "1+": ("b", "d"),
     "2+": ("a", "b", "d"),
     "3+": ("a", "c", "d"),
     "4+": ("a", "d"),
+    "5+": ("a", "b", "c", "d"),
 }
 SCHEMES = {"log": "log-log", "identity": "identity", "aggregate": "aggregated"}
 METRICS = {
@@ -62,15 +64,15 @@ def metric_cell(metric: str, decimals: int, value: float, is_best: bool) -> str:
     return f"$\\mathbf{{{text}}}$" if is_best else f"${text}$"
 
 
-def table_header(
-    caption: str, label: str, columns: str, font_size: str = "small"
-) -> list[str]:
+def table_header(caption: str, label: str, columns: str) -> list[str]:
+    # The tables have many columns, so they are scaled to the width of the page
     return [
         "\\begin{table}[H]",
         "  \\centering",
-        f"  \\{font_size}",
+        "  \\small",
         f"  \\caption{{{caption}}}",
         f"  \\label{{{label}}}",
+        "  \\resizebox{\\textwidth}{!}{%",
         f"  \\begin{{tabular}}{{{columns}}}",
         "    \\toprule",
     ]
@@ -86,7 +88,6 @@ def write_metric_table(scheme: str, metric: str) -> None:
         "The best model of each language is in bold.",
         f"tab:{metric}_{scheme}",
         "l" + "r" * len(MODELS),
-        font_size="footnotesize" if metric == "aic" else "small",
     )
     lines.append("    Language & " + " & ".join(MODELS) + " \\\\")
     lines.append("    \\midrule")
@@ -96,7 +97,7 @@ def write_metric_table(scheme: str, metric: str) -> None:
             metric_cell(metric, decimals, row[model], model == best) for model in MODELS
         ]
         lines.append(f"    {language} & " + " & ".join(cells) + " \\\\")
-    lines += ["    \\bottomrule", "  \\end{tabular}", "\\end{table}"]
+    lines += ["    \\bottomrule", "  \\end{tabular}}", "\\end{table}"]
     (OUTPUT_DIR / f"{metric}_{scheme}.tex").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
@@ -112,7 +113,6 @@ def write_parameter_table(scheme: str) -> None:
         f"tab:params_{scheme}",
         "l" + "r" * len(columns),
     )
-    lines.insert(-2, "  \\resizebox{\\textwidth}{!}{%")
     spans = " & ".join(
         f"\\multicolumn{{{len(ps)}}}{{c}}{{{model}}}" for model, ps in PARAMETERS.items()
     )
