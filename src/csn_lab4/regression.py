@@ -61,10 +61,14 @@ MODELS = {
     "2": Model(lambda n, a, b: a * n**b, ("a", "b")),
     "3": Model(lambda n, a, c: a * np.exp(c * n), ("a", "c")),
     "4": Model(lambda n, a: a * np.log(n), ("a",)),
+    "5": Model(lambda n, a, b, c: a * n**b * np.exp(c * n), ("a", "b", "c")),
     "1+": Model(lambda n, b, d: (n / 2) ** b + d, ("b", "d")),
     "2+": Model(lambda n, a, b, d: a * n**b + d, ("a", "b", "d")),
     "3+": Model(lambda n, a, c, d: a * np.exp(c * n) + d, ("a", "c", "d")),
     "4+": Model(lambda n, a, d: a * np.log(n) + d, ("a", "d")),
+    "5+": Model(
+        lambda n, a, b, c, d: a * n**b * np.exp(c * n) + d, ("a", "b", "c", "d")
+    ),
 }
 
 
@@ -103,6 +107,13 @@ def starting_points(
         return [[float(np.exp(log_a)), float(c)]]
     if name == "4":
         return [[float(np.exp(np.mean(log_y - np.log(log_n))))]]
+    if name == "5":
+        # log y = log a + b log n + c n, plus the two models that 5 generalizes
+        design = np.column_stack((np.ones_like(n), log_n, n))
+        log_a, b, c = np.linalg.lstsq(design, log_y, rcond=None)[0]
+        a2, b2 = fitted["2"].params["a"], fitted["2"].params["b"]
+        a3, c3 = fitted["3"].params["a"], fitted["3"].params["c"]
+        return [[float(np.exp(log_a)), float(b), float(c)], [a2, b2, 0.0], [a3, 0.0, c3]]
     if name == "1+":
         b = fitted["1"].params["b"]
         return [[b, 0.0], [b / 2, 1.0]]
@@ -115,6 +126,14 @@ def starting_points(
     if name == "4+":
         a, d = np.polyfit(log_n, y, 1)
         return [[float(a), float(d)], [fitted["4"].params["a"], 0.0]]
+    if name == "5+":
+        # Start from the three fitted models that 5+ generalizes
+        five, two, three = fitted["5"].params, fitted["2+"].params, fitted["3+"].params
+        return [
+            [five["a"], five["b"], five["c"], 0.0],
+            [two["a"], two["b"], 0.0, two["d"]],
+            [three["a"], 0.0, three["c"], three["d"]],
+        ]
     raise ValueError(f"Unknown model '{name}'")
 
 
