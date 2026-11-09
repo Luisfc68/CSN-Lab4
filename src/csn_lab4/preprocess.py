@@ -7,6 +7,8 @@ from conllu import parse_incr
 UD_DATA_DIR = Path("data/ud-treebanks-v2.18/").resolve()
 OUTPUT_DIR = Path("output/languages/").resolve()
 SUMMARY_CSV_PATH = Path("output/summary_dependency_tree_metrics.csv").resolve()
+# Deliverable files in the format of the guide (n, <k^2> and <d> with no header)
+DELIVERABLE_DIR = Path("data/").resolve()
 
 LANGUAGE_FILES = {
     "Arabic": [
@@ -31,14 +33,14 @@ LANGUAGE_FILES = {
     "Chinese": [
         "UD_Chinese-Beginner/zh_beginner-ud-test.conllu",
         "UD_Chinese-CFL/zh_cfl-ud-test.conllu",
-        "UD_Chinese-GSD/zh_gsd-ud-dev.conllu",
-        "UD_Chinese-GSD/zh_gsd-ud-test.conllu",
-        "UD_Chinese-GSD/zh_gsd-ud-train.conllu",
+        # These are the same as the "Simp" version
+        # "UD_Chinese-GSD/zh_gsd-ud-dev.conllu",
+        # "UD_Chinese-GSD/zh_gsd-ud-test.conllu",
+        # "UD_Chinese-GSD/zh_gsd-ud-train.conllu",
         "UD_Chinese-GSDSimp/zh_gsdsimp-ud-dev.conllu",
         "UD_Chinese-GSDSimp/zh_gsdsimp-ud-test.conllu",
         "UD_Chinese-GSDSimp/zh_gsdsimp-ud-train.conllu",
         "UD_Chinese-HK/zh_hk-ud-test.conllu",
-        "UD_Chinese-PatentChar/zh_patentchar-ud-test.conllu",
         "UD_Chinese-PUD/zh_pud-ud-test.conllu",
     ],
     "Czech": [
@@ -143,14 +145,16 @@ LANGUAGE_FILES = {
         "UD_Turkish-BOUN/tr_boun-ud-dev.conllu",
         "UD_Turkish-BOUN/tr_boun-ud-test.conllu",
         "UD_Turkish-BOUN/tr_boun-ud-train.conllu",
-        "UD_Turkish_English-BUTR/qti_butr-ud-test.conllu",
+        # Mixes Turkish and English
+        # "UD_Turkish_English-BUTR/qti_butr-ud-test.conllu",
         "UD_Turkish-FrameNet/tr_framenet-ud-dev.conllu",
         "UD_Turkish-FrameNet/tr_framenet-ud-test.conllu",
         "UD_Turkish-FrameNet/tr_framenet-ud-train.conllu",
         "UD_Turkish-GB/tr_gb-ud-test.conllu",
-        "UD_Turkish_German-SAGT/qtd_sagt-ud-dev.conllu",
-        "UD_Turkish_German-SAGT/qtd_sagt-ud-test.conllu",
-        "UD_Turkish_German-SAGT/qtd_sagt-ud-train.conllu",
+        # Mixes Turkish and German
+        # "UD_Turkish_German-SAGT/qtd_sagt-ud-dev.conllu",
+        # "UD_Turkish_German-SAGT/qtd_sagt-ud-test.conllu",
+        # "UD_Turkish_German-SAGT/qtd_sagt-ud-train.conllu",
         "UD_Turkish-IMST/tr_imst-ud-dev.conllu",
         "UD_Turkish-IMST/tr_imst-ud-test.conllu",
         "UD_Turkish-IMST/tr_imst-ud-train.conllu",
@@ -176,25 +180,33 @@ def compute_sentence_metrics(token_list):
         for token in token_list
         if isinstance(token["id"], int) and token["id"] > 0
     ]
+    heads = {token["id"]: token["head"] for token in valid_tokens}
+    punctuation = {
+        token["id"] for token in valid_tokens if token["upos"] == "PUNCT"
+    }
+    words = [token for token in valid_tokens if token["id"] not in punctuation]
 
-    n = len(valid_tokens)
+    n = len(words)
     if n < 2:
         return None
 
-    token_ids = {token["id"] for token in valid_tokens}
-    degrees = {tid: 0 for tid in token_ids}
+    positions = {token["id"]: i for i, token in enumerate(words, start=1)}
+    degrees = {position: 0 for position in positions.values()}
     edge_lengths = []
 
-    for token in valid_tokens:
-        dep_id = token["id"]
+    for token in words:
         head_id = token["head"]
+        while head_id in punctuation:
+            head_id = heads[head_id]
 
-        if head_id != 0 and head_id in token_ids:
-            degrees[dep_id] += 1
-            degrees[head_id] += 1
-            edge_lengths.append(abs(dep_id - head_id))
+        if head_id in positions:
+            dep_position = positions[token["id"]]
+            head_position = positions[head_id]
+            degrees[dep_position] += 1
+            degrees[head_position] += 1
+            edge_lengths.append(abs(dep_position - head_position))
 
-    if len(edge_lengths) == 0:
+    if len(edge_lengths) != n - 1:
         return None
 
     k2_avg = sum(k**2 for k in degrees.values()) / n
@@ -204,58 +216,66 @@ def compute_sentence_metrics(token_list):
     return n, k2_avg, d_avg, q
 
 
-# Ensure output paths exist
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-SUMMARY_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+if __name__ == "__main__":
+    # Ensure output paths exist
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    SUMMARY_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DELIVERABLE_DIR.mkdir(parents=True, exist_ok=True)
 
-summary_rows = []
+    summary_rows = []
 
-# Process each language
-for lang, files in LANGUAGE_FILES.items():
-    print(f"Processing {lang}...")
-    output_path = OUTPUT_DIR / f"{lang.lower()}_dependency_tree_metrics.csv"
+    # Process each language
+    for lang, files in LANGUAGE_FILES.items():
+        print(f"Processing {lang}...")
+        output_path = OUTPUT_DIR / f"{lang.lower()}_dependency_tree_metrics.csv"
+        deliverable_path = DELIVERABLE_DIR / f"{lang}_dependency_tree_metrics.txt"
 
-    n_list = []
-    d_avg_list = []
+        n_list = []
+        d_avg_list = []
 
-    with open(output_path, mode="w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(["n", "k2_avg", "d_avg", "q"])
+        with (
+            open(output_path, mode="w", newline="", encoding="utf-8") as csv_file,
+            open(deliverable_path, mode="w", newline="", encoding="utf-8") as txt_file,
+        ):
+            writer = csv.writer(csv_file)
+            writer.writerow(["n", "k2_avg", "d_avg", "q"])
+            deliverable_writer = csv.writer(txt_file, delimiter=" ", lineterminator="\n")
 
-        for file_path in files:
-            full_path = UD_DATA_DIR / file_path
-            if not full_path.exists():
-                continue
+            for file_path in files:
+                full_path = UD_DATA_DIR / file_path
+                if not full_path.exists():
+                    raise FileNotFoundError(full_path)
 
-            with open(full_path, "r", encoding="utf-8") as f:
-                for token_list in parse_incr(f):
-                    metrics = compute_sentence_metrics(token_list)
-                    if metrics is not None:
-                        n, k2_avg, d_avg, q = metrics
-                        writer.writerow([n, k2_avg, d_avg, q])
+                with open(full_path, "r", encoding="utf-8") as f:
+                    for token_list in parse_incr(f):
+                        metrics = compute_sentence_metrics(token_list)
+                        if metrics is not None:
+                            n, k2_avg, d_avg, q = metrics
+                            writer.writerow([n, k2_avg, d_avg, q])
+                            deliverable_writer.writerow([n, k2_avg, d_avg])
 
-                        n_list.append(n)
-                        d_avg_list.append(d_avg)
+                            n_list.append(n)
+                            d_avg_list.append(d_avg)
 
-    # compute summary statistics
-    N = len(n_list)
-    if N > 0:
-        mu_n = mean(n_list)
-        sd_n = stdev(n_list) if N > 1 else 0.0
-        mu_x = mean(d_avg_list)
-        sd_x = stdev(d_avg_list) if N > 1 else 0.0
+        # compute summary statistics
+        N = len(n_list)
+        if N > 0:
+            mu_n = mean(n_list)
+            sd_n = stdev(n_list) if N > 1 else 0.0
+            mu_x = mean(d_avg_list)
+            sd_x = stdev(d_avg_list) if N > 1 else 0.0
 
-        summary_rows.append(
-            [lang, N, round(mu_n, 4), round(sd_n, 4), round(mu_x, 4), round(sd_x, 4)]
-        )
-        print(
-            f"  {lang}: N={N}, µn={mu_n:.2f}, σn={sd_n:.2f}, µx={mu_x:.2f}, σx={sd_x:.2f}"
-        )
+            summary_rows.append(
+                [lang, N, round(mu_n, 4), round(sd_n, 4), round(mu_x, 4), round(sd_x, 4)]
+            )
+            print(
+                f"  {lang}: N={N}, µn={mu_n:.2f}, σn={sd_n:.2f}, µx={mu_x:.2f}, σx={sd_x:.2f}"
+            )
 
-# Write unified summary table across all languages
-with open(SUMMARY_CSV_PATH, mode="w", newline="", encoding="utf-8") as sum_file:
-    writer = csv.writer(sum_file)
-    writer.writerow(["Language", "N", "µn", "σn", "µx", "σx"])
-    writer.writerows(summary_rows)
+    # Write unified summary table across all languages
+    with open(SUMMARY_CSV_PATH, mode="w", newline="", encoding="utf-8") as sum_file:
+        writer = csv.writer(sum_file)
+        writer.writerow(["Language", "N", "n_mean", "n_stdev", "d_mean", "d_stdev"])
+        writer.writerows(summary_rows)
 
-print(f"\nDone! Unique summary file written to '{SUMMARY_CSV_PATH}'.")
+    print(f"\nDone! Unique summary file written to '{SUMMARY_CSV_PATH}'.")
