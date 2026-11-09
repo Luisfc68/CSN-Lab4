@@ -1,7 +1,6 @@
-"""Regression analysis of the mean dependency length of dependency trees."""
+"""Preliminary plots of the mean dependency length of dependency trees."""
 
 import argparse
-import math
 from pathlib import Path
 from typing import NamedTuple
 
@@ -34,19 +33,6 @@ MIN_GROUP_SIZE = 10
 SCATTER_MIN_GROUP_SIZE = 10
 LINEAR_LIMIT_PADDING = 0.05
 LOG_LIMIT_PADDING = 1.05
-
-# Regression config
-MODEL_ENSEMBLE = {
-    "model_0": lambda n: n / 3 + 1 / 3,
-    "model_1": lambda n, b: (n / 2) ** b,
-    "model_2": lambda n, a, b: a * n**b,
-    "model_3": lambda n, a, c: a * math.exp(c * n),
-    "model_4": lambda n, a: a * math.log(n),
-    "model_1+": lambda n, b, d: (n / 2) ** b + d,
-    "model_2+": lambda n, a, b, d: a * n**b + d,
-    "model_3+": lambda n, a, c, d: a * math.exp(c * n) + d,
-    "model_4+": lambda n, a, d: a * math.log(n) + d,
-}
 
 
 class ReferenceLine(NamedTuple):
@@ -308,10 +294,6 @@ def plot_preliminary_results(language: str) -> list[Path]:
     ]
 
 
-def run_regression(language: str) -> None:
-    metrics: pd.DataFrame = load_language_metrics(language)
-
-
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Generate regression plots of the mean dependency length "
@@ -328,7 +310,7 @@ def main(argv: list[str] | None = None) -> None:
     language_options.add_argument(
         "--all-languages",
         action="store_true",
-        help="Generate plots and run regression for every available language.",
+        help="Generate plots for every available language.",
     )
     args = parser.parse_args(argv)
 
@@ -340,8 +322,6 @@ def main(argv: list[str] | None = None) -> None:
         output_paths = plot_preliminary_results(language)
         for path in output_paths:
             print(f"Plot saved to '{path}'.")
-
-        run_regression(language)
 
 
 if __name__ == "__main__":
