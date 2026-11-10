@@ -28,11 +28,13 @@ INVALID_RESIDUAL = 1e6  # replaces residuals that overflow during the search
 
 # Diagnostics and plot config
 SCHEMES = ("identity", "aggregate", "log")
-MIN_GROUP_SIZE = 10  # sentences needed to estimate a residual variance for a length
+MIN_GROUP_SIZE = 5  # sentences needed for a length to be fitted and plotted
 BEST_FIT_COLOR = "#2ca02c"
 IDENTITY_COLOR = "#1f77b4"
 FIGURE_SIZE = (10, 6)
 FIGURE_DPI = 150
+BEST_FIT_RANKS = 2  # best models by AIC shown in the best fit plots
+LINEAR_LIMIT_PADDING = 0.05
 
 
 class Model(NamedTuple):
@@ -196,6 +198,12 @@ def build_fit_data(metrics: pd.DataFrame, scheme: str) -> tuple[FitData, np.ndar
     return FitData(n, y, log_scale=False), y
 
 
+def drop_small_groups(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the sentences of lengths with at least MIN_GROUP_SIZE sentences"""
+    counts = metrics.groupby("n")["d_avg"].transform("count")
+    return metrics[counts >= MIN_GROUP_SIZE]
+
+
 def fit_all_models(metrics: pd.DataFrame, scheme: str) -> dict[str, FitResult]:
     data, y = build_fit_data(metrics, scheme)
     fitted: dict[str, FitResult] = {}
@@ -216,8 +224,13 @@ def model_selection_row(fits: dict[str, FitResult]) -> dict[str, dict[str, float
     }
 
 
+def ranked_models(fits: dict[str, FitResult]) -> list[str]:
+    """Model names sorted from the best to the worst by AIC"""
+    return sorted(fits, key=lambda name: fits[name].aic)
+
+
 def best_model(fits: dict[str, FitResult]) -> str:
-    return min(fits, key=lambda name: fits[name].aic)
+    return ranked_models(fits)[0]
 
 
 def best_residuals(
@@ -280,9 +293,14 @@ def plot_residual_variance(
 
 
 def plot_best_fit(
-    language: str, scheme: str, metrics: pd.DataFrame, fits: dict[str, FitResult]
+    language: str,
+    scheme: str,
+    metrics: pd.DataFrame,
+    fits: dict[str, FitResult],
+    *,
+    log_scale: bool,
 ) -> Path:
-    """Plot the data with the best curve of a scheme and the null model, log-log"""
+    """Plot the data with the best models by AIC and the null model"""
     n_values = np.arange(metrics["n"].min(), metrics["n"].max() + 1, dtype=float)
     means = metrics.groupby("n")["d_avg"].mean()
 
@@ -295,14 +313,15 @@ def plot_best_fit(
         means.index, means.values, color=SPREAD_COLOR, linewidth=1.5, label="mean per n"
     )
 
-    name = best_model(fits)
-    axis.plot(
-        n_values,
-        MODELS[name].function(n_values, **fits[name].params),
-        color=BEST_FIT_COLOR,
-        linewidth=2.5,
-        label=f"best {scheme} fit: model {name}",
-    )
+    for rank, name in enumerate(ranked_models(fits)[:BEST_FIT_RANKS], start=1):
+        axis.plot(
+            n_values,
+            MODELS[name].function(n_values, **fits[name].params),
+            color=BEST_FIT_COLOR,
+            linewidth=2.5 if rank == 1 else 2,
+            linestyle="-" if rank == 1 else ":",
+            label=f"AIC rank {rank} ({scheme}): model {name}",
+        )
 
     axis.plot(
         n_values,
@@ -312,18 +331,24 @@ def plot_best_fit(
         linestyle="--",
         label="model 0: (n + 1) / 3",
     )
-    axis.set_xscale("log")
-    axis.set_yscale("log")
-    # Frame the data, not the null model, so the fit can be judged against the data
-    axis.set_ylim(metrics["d_avg"].min() / 1.1, metrics["d_avg"].max() * 1.1)
+    if log_scale:
+        axis.set_xscale("log")
+        axis.set_yscale("log")
+        # Frame the data, not the null model, so the fit can be judged against the data
+        axis.set_ylim(metrics["d_avg"].min() / 1.1, metrics["d_avg"].max() * 1.1)
+    else:
+        low, high = metrics["d_avg"].min(), metrics["d_avg"].max()
+        padding = (high - low) * LINEAR_LIMIT_PADDING
+        axis.set_ylim(low - padding, high + padding)
     axis.set_xlabel("vertices")
     axis.set_ylabel("mean dependency length")
     axis.legend(loc="upper left", frameon=True, framealpha=0.95)
     figure.tight_layout()
 
+    scale = "log" if log_scale else "linear"
     output_dir = PLOTS_DIR / scheme
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{language.lower()}_best_fit.png"
+    output_path = output_dir / f"{language.lower()}_best_fit_{scale}.png"
     figure.savefig(output_path, dpi=FIGURE_DPI)
     plt.close(figure)
     return output_path
@@ -367,12 +392,13 @@ if __name__ == "__main__":
     diagnostics = []
 
     for language in get_available_languages():
-        metrics = load_language_metrics(language)
+        metrics = drop_small_groups(load_language_metrics(language))
         for scheme in SCHEMES:
             fits = fit_all_models(metrics, scheme)
             results[scheme][language] = fits
             diagnostics.append(residual_diagnostics(language, scheme, metrics, fits))
-            plot_best_fit(language, scheme, metrics, fits)
+            for log_scale in (True, False):
+                plot_best_fit(language, scheme, metrics, fits, log_scale=log_scale)
         plot_residual_variance(
             language, metrics, {s: results[s][language] for s in SCHEMES}
         )

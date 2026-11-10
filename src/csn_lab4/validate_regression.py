@@ -7,6 +7,7 @@ from regression import (
     SCHEMES,
     best_model,
     build_fit_data,
+    drop_small_groups,
     fit_all_models,
     model_selection_row,
     residuals,
@@ -53,7 +54,7 @@ def check_optimality() -> pd.DataFrame:
     rng = np.random.default_rng(1)
     rows = []
     for language in get_available_languages():
-        metrics = load_language_metrics(language)
+        metrics = drop_small_groups(load_language_metrics(language))
         for scheme in SCHEMES:
             fits = fit_all_models(metrics, scheme)
             data, _ = build_fit_data(metrics, scheme)
@@ -91,7 +92,9 @@ def check_optimality() -> pd.DataFrame:
 
 
 def check_artificial_data() -> pd.DataFrame:
-    n = load_language_metrics(ARTIFICIAL_LANGUAGE)["n"].to_numpy(dtype=float)
+    n = drop_small_groups(load_language_metrics(ARTIFICIAL_LANGUAGE))["n"].to_numpy(
+        dtype=float
+    )
     rows = []
     for name, truth in TRUE_PARAMETERS.items():
         selected = 0

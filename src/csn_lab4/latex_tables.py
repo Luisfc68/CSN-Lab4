@@ -162,10 +162,10 @@ if __name__ == "__main__":
         write_figure(
             f"best_fit_{scheme}",
             f"Mean dependency length $\\langle d \\rangle$ versus sentence length $n$ with "
-            f"the best model of the {label} fit (green), the mean per length (orange) and "
-            "the null model (dashed red), in log-log scale.",
+            f"the two best models by AIC (green) of the {label} fit, "
+            "the mean per length (orange) and the null model (dashed red), in log-log scale.",
             {
-                language: f"figs/best_fit/{scheme}/{language}_best_fit.png"
+                language: f"figs/best_fit/{scheme}/{language}_best_fit_log.png"
                 for language in LANGUAGES
             },
         )
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         "residual_variance",
         "Variance of the residuals of the best model versus sentence length $n$, "
         "for the identity and log-log fits, in log-log scale. Lengths with fewer than "
-        "10 sentences are not shown. A flat curve indicates homoscedasticity.",
+        "5 sentences are not shown. A flat curve indicates homoscedasticity.",
         {
             language: f"figs/residual_variance/{language}_residual_variance.png"
             for language in LANGUAGES
