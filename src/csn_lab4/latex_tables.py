@@ -21,10 +21,14 @@ PARAMETERS = {
 }
 SCHEMES = {"log": "log-log", "identity": "identity", "aggregate": "aggregated"}
 METRICS = {
-    "s": ("Residual standard error $s$", 4),
-    "aic": ("AIC", 1),
-    "delta": ("AIC differences $\\Delta$", 1),
-    "weights": ("Akaike weights", 3),
+    # file name: (title, source CSV, column, decimals, criterion that picks the best model)
+    "s": ("Residual standard error $s$", "aic", "s", 4, "aic"),
+    "aic": ("AIC", "aic", "aic", 1, "aic"),
+    "delta_aic": ("AIC differences $\\Delta$", "aic", "delta", 1, "aic"),
+    "weight_aic": ("Akaike weights", "aic", "weight", 3, "aic"),
+    "bic": ("BIC", "bic", "bic", 1, "bic"),
+    "delta_bic": ("BIC differences $\\Delta$", "bic", "delta", 1, "bic"),
+    "weight_bic": ("BIC weights", "bic", "weight", 3, "bic"),
 }
 LANGUAGES = (
     "arabic",
@@ -58,7 +62,7 @@ def significant(value: float) -> str:
 
 
 def metric_cell(metric: str, decimals: int, value: float, is_best: bool) -> str:
-    if metric == "weights" and value < MIN_WEIGHT:
+    if metric == "weight" and value < MIN_WEIGHT:
         return f"$<{MIN_WEIGHT}$"
     text = fixed(value, decimals)
     return f"$\\mathbf{{{text}}}$" if is_best else f"${text}$"
@@ -78,52 +82,61 @@ def table_header(caption: str, label: str, columns: str) -> list[str]:
     ]
 
 
-def write_metric_table(scheme: str, metric: str) -> None:
-    title, decimals = METRICS[metric]
-    table = pd.read_csv(REGRESSION_DIR / scheme / f"{metric}.csv", index_col="language")
-    delta = pd.read_csv(REGRESSION_DIR / scheme / "delta.csv", index_col="language")
+def write_metric_table(scheme: str, name: str) -> None:
+    title, source, column, decimals, criterion = METRICS[name]
+    fits = pd.read_csv(REGRESSION_DIR / scheme / f"{source}.csv")
+    table = fits.pivot(index="language", columns="model", values=column)
+    scores = fits.pivot(index="language", columns="model", values=criterion)
 
     lines = table_header(
         f"{title} of each model for the {SCHEMES[scheme]} fit. "
         "The best model of each language is in bold.",
-        f"tab:{metric}_{scheme}",
+        f"tab:{name}_{scheme}",
         "l" + "r" * len(MODELS),
     )
     lines.append("    Language & " + " & ".join(MODELS) + " \\\\")
     lines.append("    \\midrule")
     for language, row in table.iterrows():
-        best = delta.loc[language].idxmin()
+        best = scores.loc[language].idxmin()
         cells = [
-            metric_cell(metric, decimals, row[model], model == best) for model in MODELS
+            metric_cell(column, decimals, row[model], model == best) for model in MODELS
         ]
         lines.append(f"    {language} & " + " & ".join(cells) + " \\\\")
     lines += ["    \\bottomrule", "  \\end{tabular}}", "\\end{table}"]
-    (OUTPUT_DIR / f"{metric}_{scheme}.tex").write_text(
+    (OUTPUT_DIR / f"{name}_{scheme}.tex").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 
 
-def write_parameter_table(scheme: str) -> None:
-    table = pd.read_csv(REGRESSION_DIR / scheme / "params.csv", index_col="language")
-    columns = [f"{model}_{p}" for model, ps in PARAMETERS.items() for p in ps]
+def write_parameter_table(
+    scheme: str, source: str, models: tuple[str, ...], title: str, name: str
+) -> None:
+    values = pd.read_csv(REGRESSION_DIR / scheme / f"{source}.csv")
+    table = pd.DataFrame(
+        {
+            f"{model}_{p}": values[values["model"] == model].set_index("language")[p]
+            for model in models
+            for p in PARAMETERS[model]
+        }
+    )
+    columns = list(table.columns)
 
     lines = table_header(
-        f"Parameters giving the best fit of each model for the {SCHEMES[scheme]} fit. "
-        "Model 0 has no parameters.",
-        f"tab:params_{scheme}",
+        f"{title} for the {SCHEMES[scheme]} fit.",
+        f"tab:{name}_{scheme}",
         "l" + "r" * len(columns),
     )
     spans = " & ".join(
-        f"\\multicolumn{{{len(ps)}}}{{c}}{{{model}}}" for model, ps in PARAMETERS.items()
+        f"\\multicolumn{{{len(PARAMETERS[model])}}}{{c}}{{{model}}}" for model in models
     )
-    symbols = " & ".join(f"${p}$" for ps in PARAMETERS.values() for p in ps)
+    symbols = " & ".join(f"${p}$" for model in models for p in PARAMETERS[model])
     lines += [f"    & {spans} \\\\", "    \\midrule", f"    Language & {symbols} \\\\"]
     lines.append("    \\midrule")
     for language, row in table.iterrows():
         cells = [f"${significant(row[column])}$" for column in columns]
         lines.append(f"    {language} & " + " & ".join(cells) + " \\\\")
     lines += ["    \\bottomrule", "  \\end{tabular}}", "\\end{table}"]
-    (OUTPUT_DIR / f"params_{scheme}.tex").write_text(
+    (OUTPUT_DIR / f"{name}_{scheme}.tex").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 
@@ -156,16 +169,36 @@ if __name__ == "__main__":
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for scheme, label in SCHEMES.items():
-        for metric in METRICS:
-            write_metric_table(scheme, metric)
-        write_parameter_table(scheme)
+        for name in METRICS:
+            write_metric_table(scheme, name)
+        write_parameter_table(
+            scheme,
+            "params",
+            tuple(PARAMETERS),
+            "Parameters giving the best fit of each model",
+            "params",
+        )
+        write_parameter_table(
+            scheme,
+            "initial_values",
+            ("1", "2", "3", "4", "5"),
+            "Initial parameters of each nested model",
+            "initial_nested",
+        )
+        write_parameter_table(
+            scheme,
+            "initial_values",
+            ("1+", "2+", "3+", "4+", "5+"),
+            "Initial parameters of each model with offset",
+            "initial_offset",
+        )
         write_figure(
             f"best_fit_{scheme}",
             f"Mean dependency length $\\langle d \\rangle$ versus sentence length $n$ with "
             f"the two best models by AIC (green) of the {label} fit, "
             "the mean per length (orange) and the null model (dashed red), in log-log scale.",
             {
-                language: f"figs/best_fit/{scheme}/{language}_best_fit_log.png"
+                language: f"figs/best_fit/{scheme}/{language}_best_fit_aic_log.png"
                 for language in LANGUAGES
             },
         )

@@ -33,7 +33,8 @@ BEST_FIT_COLOR = "#2ca02c"
 IDENTITY_COLOR = "#1f77b4"
 FIGURE_SIZE = (10, 6)
 FIGURE_DPI = 150
-BEST_FIT_RANKS = 2  # best models by AIC shown in the best fit plots
+BEST_FIT_RANKS = 2  # best models per criterion shown in the best fit plots
+CRITERION_COLORS = {"aic": BEST_FIT_COLOR, "bic": IDENTITY_COLOR}
 LINEAR_LIMIT_PADDING = 0.05
 
 
@@ -54,6 +55,7 @@ class FitResult(NamedTuple):
     rss: float
     s: float
     aic: float
+    bic: float
     converged: bool
 
 
@@ -139,15 +141,16 @@ def starting_points(
     raise ValueError(f"Unknown model '{name}'")
 
 
-def information_criteria(rss: float, sample_size: int, p: int) -> tuple[float, float]:
+def information_criteria(rss: float, sample_size: int, p: int) -> tuple[float, float, float]:
     s = float(np.sqrt(rss / (sample_size - p)))
-    aic = float(
+    log_likelihood = (
         sample_size * np.log(2 * np.pi)
         + sample_size * np.log(rss / sample_size)
         + sample_size
-        + 2 * (p + 1)
     )
-    return s, aic
+    aic = float(log_likelihood + 2 * (p + 1))
+    bic = float(log_likelihood + np.log(sample_size) * (p + 1))
+    return s, aic, bic
 
 
 def fit_model(
@@ -158,8 +161,8 @@ def fit_model(
 
     if not model.parameters:
         rss = float(np.sum(residuals(np.array([]), model, data) ** 2))
-        s, aic = information_criteria(rss, sample_size, 0)
-        return FitResult({}, {}, rss, s, aic, True)
+        s, aic, bic = information_criteria(rss, sample_size, 0)
+        return FitResult({}, {}, rss, s, aic, bic, True)
 
     best = None
     best_start = None
@@ -176,13 +179,14 @@ def fit_model(
             best, best_start = solution, start
 
     rss = float(np.sum(best.fun**2))
-    s, aic = information_criteria(rss, sample_size, len(model.parameters))
+    s, aic, bic = information_criteria(rss, sample_size, len(model.parameters))
     return FitResult(
         dict(zip(model.parameters, map(float, best.x))),
         dict(zip(model.parameters, best_start)),
         rss,
         s,
         aic,
+        bic,
         bool(best.status > 0),
     )
 
@@ -212,10 +216,12 @@ def fit_all_models(metrics: pd.DataFrame, scheme: str) -> dict[str, FitResult]:
     return fitted
 
 
-def model_selection_row(fits: dict[str, FitResult]) -> dict[str, dict[str, float]]:
-    """AIC differences and Akaike weights of one language"""
-    aic = np.array([fit.aic for fit in fits.values()])
-    delta = aic - aic.min()
+def model_selection_row(
+    fits: dict[str, FitResult], criterion: str = "aic"
+) -> dict[str, dict[str, float]]:
+    """Differences and Akaike weights of one language for an information criterion"""
+    values = np.array([getattr(fit, criterion) for fit in fits.values()])
+    delta = values - values.min()
     weights = np.exp(-delta / 2)
     weights /= weights.sum()
     return {
@@ -224,13 +230,13 @@ def model_selection_row(fits: dict[str, FitResult]) -> dict[str, dict[str, float
     }
 
 
-def ranked_models(fits: dict[str, FitResult]) -> list[str]:
-    """Model names sorted from the best to the worst by AIC"""
-    return sorted(fits, key=lambda name: fits[name].aic)
+def ranked_models(fits: dict[str, FitResult], criterion: str = "aic") -> list[str]:
+    """Model names sorted from the best to the worst by an information criterion"""
+    return sorted(fits, key=lambda name: getattr(fits[name], criterion))
 
 
-def best_model(fits: dict[str, FitResult]) -> str:
-    return ranked_models(fits)[0]
+def best_model(fits: dict[str, FitResult], criterion: str = "aic") -> str:
+    return ranked_models(fits, criterion)[0]
 
 
 def best_residuals(
@@ -298,9 +304,10 @@ def plot_best_fit(
     metrics: pd.DataFrame,
     fits: dict[str, FitResult],
     *,
+    criterion: str,
     log_scale: bool,
 ) -> Path:
-    """Plot the data with the best models by AIC and the null model"""
+    """Plot the data with the best models by an information criterion and the null model"""
     n_values = np.arange(metrics["n"].min(), metrics["n"].max() + 1, dtype=float)
     means = metrics.groupby("n")["d_avg"].mean()
 
@@ -313,14 +320,16 @@ def plot_best_fit(
         means.index, means.values, color=SPREAD_COLOR, linewidth=1.5, label="mean per n"
     )
 
-    for rank, name in enumerate(ranked_models(fits)[:BEST_FIT_RANKS], start=1):
+    for rank, name in enumerate(
+        ranked_models(fits, criterion)[:BEST_FIT_RANKS], start=1
+    ):
         axis.plot(
             n_values,
             MODELS[name].function(n_values, **fits[name].params),
-            color=BEST_FIT_COLOR,
+            color=CRITERION_COLORS[criterion],
             linewidth=2.5 if rank == 1 else 2,
             linestyle="-" if rank == 1 else ":",
-            label=f"AIC rank {rank} ({scheme}): model {name}",
+            label=f"{criterion.upper()} rank {rank} ({scheme}): model {name}",
         )
 
     axis.plot(
@@ -348,43 +357,47 @@ def plot_best_fit(
     scale = "log" if log_scale else "linear"
     output_dir = PLOTS_DIR / scheme
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{language.lower()}_best_fit_{scale}.png"
+    output_path = output_dir / f"{language.lower()}_best_fit_{criterion}_{scale}.png"
     figure.savefig(output_path, dpi=FIGURE_DPI)
     plt.close(figure)
     return output_path
 
 
 def write_tables(scheme: str, results: dict[str, dict[str, FitResult]]) -> None:
-    """Write the s, AIC, delta, weight, parameter and starting value tables of a scheme."""
+    """Write the AIC, BIC, fitted parameter and initial value tables of a scheme."""
     output_dir = OUTPUT_DIR / scheme
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    tables: dict[str, list[dict]] = {key: [] for key in ("s", "aic", "delta", "weights")}
-    params, starts, convergence = [], [], []
-
+    aic_rows, bic_rows, params_rows, starts_rows = [], [], [], []
     for language, fits in results.items():
-        selection = model_selection_row(fits)
-        tables["s"].append({"language": language} | {m: f.s for m, f in fits.items()})
-        tables["aic"].append({"language": language} | {m: f.aic for m, f in fits.items()})
-        tables["delta"].append({"language": language} | selection["delta"])
-        tables["weights"].append({"language": language} | selection["weight"])
-        params.append(
-            {"language": language}
-            | {f"{m}_{p}": v for m, f in fits.items() for p, v in f.params.items()}
-        )
-        starts.append(
-            {"language": language}
-            | {f"{m}_{p}": v for m, f in fits.items() for p, v in f.start.items()}
-        )
-        convergence.append(
-            {"language": language} | {m: f.converged for m, f in fits.items()}
-        )
+        aic = model_selection_row(fits, "aic")
+        bic = model_selection_row(fits, "bic")
+        for name, fit in fits.items():
+            key = {"language": language, "model": name}
+            aic_rows.append(
+                key
+                | {
+                    "s": fit.s,
+                    "aic": fit.aic,
+                    "delta": aic["delta"][name],
+                    "weight": aic["weight"][name],
+                }
+            )
+            bic_rows.append(
+                key
+                | {
+                    "bic": fit.bic,
+                    "delta": bic["delta"][name],
+                    "weight": bic["weight"][name],
+                }
+            )
+            params_rows.append(key | fit.params | {"converged": fit.converged})
+            starts_rows.append(key | fit.start)
 
-    for key, rows in tables.items():
-        pd.DataFrame(rows).to_csv(output_dir / f"{key}.csv", index=False)
-    pd.DataFrame(params).to_csv(output_dir / "params.csv", index=False)
-    pd.DataFrame(starts).to_csv(output_dir / "initial_values.csv", index=False)
-    pd.DataFrame(convergence).to_csv(output_dir / "converged.csv", index=False)
+    pd.DataFrame(aic_rows).to_csv(output_dir / "aic.csv", index=False)
+    pd.DataFrame(bic_rows).to_csv(output_dir / "bic.csv", index=False)
+    pd.DataFrame(params_rows).to_csv(output_dir / "params.csv", index=False)
+    pd.DataFrame(starts_rows).to_csv(output_dir / "initial_values.csv", index=False)
 
 
 if __name__ == "__main__":
@@ -397,8 +410,16 @@ if __name__ == "__main__":
             fits = fit_all_models(metrics, scheme)
             results[scheme][language] = fits
             diagnostics.append(residual_diagnostics(language, scheme, metrics, fits))
-            for log_scale in (True, False):
-                plot_best_fit(language, scheme, metrics, fits, log_scale=log_scale)
+            for criterion in CRITERION_COLORS:
+                for log_scale in (True, False):
+                    plot_best_fit(
+                        language,
+                        scheme,
+                        metrics,
+                        fits,
+                        criterion=criterion,
+                        log_scale=log_scale,
+                    )
         plot_residual_variance(
             language, metrics, {s: results[s][language] for s in SCHEMES}
         )
