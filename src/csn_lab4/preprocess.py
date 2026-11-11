@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from pathlib import Path
 from statistics import mean, stdev
 
@@ -173,7 +174,7 @@ LANGUAGE_FILES = {
 }
 
 
-def compute_sentence_metrics(token_list):
+def compute_sentence_metrics(token_list, excluded):
     """Computes n, <k^2>, <d>, and q for a single CoNLL-U sentence tree."""
     valid_tokens = [
         token
@@ -188,6 +189,7 @@ def compute_sentence_metrics(token_list):
 
     n = len(words)
     if n < 2:
+        excluded["fewer than 2 words"] += 1
         return None
 
     positions = {token["id"]: i for i, token in enumerate(words, start=1)}
@@ -207,6 +209,7 @@ def compute_sentence_metrics(token_list):
             edge_lengths.append(abs(dep_position - head_position))
 
     if len(edge_lengths) != n - 1:
+        excluded["not a tree"] += 1
         return None
 
     k2_avg = sum(k**2 for k in degrees.values()) / n
@@ -223,6 +226,7 @@ if __name__ == "__main__":
     DELIVERABLE_DIR.mkdir(parents=True, exist_ok=True)
 
     summary_rows = []
+    excluded = Counter()  # discarded sentences
 
     # Process each language
     for lang, files in LANGUAGE_FILES.items():
@@ -248,7 +252,7 @@ if __name__ == "__main__":
 
                 with open(full_path, "r", encoding="utf-8") as f:
                     for token_list in parse_incr(f):
-                        metrics = compute_sentence_metrics(token_list)
+                        metrics = compute_sentence_metrics(token_list, excluded)
                         if metrics is not None:
                             n, k2_avg, d_avg, q = metrics
                             writer.writerow([n, k2_avg, d_avg, q])
@@ -278,4 +282,7 @@ if __name__ == "__main__":
         writer.writerow(["Language", "N", "n_mean", "n_stdev", "d_mean", "d_stdev"])
         writer.writerows(summary_rows)
 
+    kept = sum(row[1] for row in summary_rows)
+    print(f"\nSentences: {kept + sum(excluded.values())}. Kept: {kept}.")
+    print(f"Excluded: {dict(excluded)}.")
     print(f"\nDone! Unique summary file written to '{SUMMARY_CSV_PATH}'.")
